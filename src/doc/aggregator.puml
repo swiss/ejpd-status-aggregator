@@ -1,0 +1,23 @@
+@startuml
+
+[Service A]
+[Service B]
+[Health Aggregator]
+
+interface health_G as "/health"
+interface health_A as "/health"
+interface health_B as "/health"
+
+health_G -- [Health Aggregator]
+health_A -- [Service A]
+health_B -- [Service B]
+
+[Health Aggregator] ---( health_A :fetch /health
+[Health Aggregator] ---( health_B :fetch /health
+
+
+note right of health_G
+  Aggregiert health-Endpoints von Service A und Service B
+end note
+
+@enduml

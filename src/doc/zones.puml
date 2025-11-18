@@ -1,0 +1,51 @@
+@startuml
+
+
+
+rectangle "Standort 1 - Zone1" {
+
+[Registry1]
+[Service A1]
+[Service B1]
+[Health Aggregator1]
+
+interface health_G1 as "/health"
+interface health_A1 as "/health"
+interface health_B1 as "/health"
+
+health_G1 -- [Health Aggregator1]
+health_A1 -- [Service A1]
+health_B1 -- [Service B1]
+
+[Health Aggregator1] ---( health_A1 :fetch /health
+[Health Aggregator1] ---( health_B1 :fetch /health
+[Health Aggregator1] --- [Registry1]
+
+}
+
+rectangle "Standort 2 - Zone2" {
+[Registry2]
+[Service A2]
+[Service B2]
+[Health Aggregator2]
+
+interface health_G2 as "/health"
+interface health_A2 as "/health"
+interface health_B2 as "/health"
+
+health_G2 -- [Health Aggregator2]
+health_A2 -- [Service A2]
+health_B2 -- [Service B2]
+
+[Health Aggregator2] ---( health_A2 :fetch /health
+[Health Aggregator2] ---( health_B2 :fetch /health
+[Health Aggregator2] --- [Registry2]
+
+}
+
+
+[Registry2] -- [Registry1] :<<Replikation>>
+
+
+
+@enduml
