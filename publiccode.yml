@@ -1,0 +1,35 @@
+publiccodeYmlVersion: 0.4.0
+name: ejpd-status-aggregator
+url: https://github.com/swiss/ejpd-status-aggregator
+softwareVersion: 3.5.001
+releaseDate: 2025-08-13
+platforms:
+  - linux
+categories:
+  - other
+usedBy:
+  - Federal Department of Justice and Police
+developmentStatus: stable
+softwareType: library
+organisation:
+  uri: https://ld.admin.ch/department/III
+description:
+  en:
+    localisedName: Health Status Aggregator
+    shortDescription: A service that aggregates the status of microservices on
+      Kubernetes, to be presented in a simplified format.
+    longDescription: A service that aggregates the status of microservices on
+      Kubernetes and displays it in a simplified format. The /health endpoints
+      of multiple systems are consolidated in the /health endpoint of the
+      current system.
+    documentation: https://github.com/swiss/ejpd-status-aggregator?tab=readme-ov-file#
+    features:
+      - Status Aggregation
+legal:
+  license: MIT
+maintenance:
+  type: internal
+localisation:
+  localisationReady: false
+  availableLanguages:
+    - en
