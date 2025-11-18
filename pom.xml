@@ -7,12 +7,12 @@
   <parent>
     <artifactId>stack-spring</artifactId>
     <groupId>isc-ejpd-pom</groupId>
-    <version>3.000</version>
+    <version>3.5.001</version>
   </parent>
 
   <groupId>isc-ejpd-library</groupId>
   <artifactId>ejpd-health-actuator-aggregator</artifactId>
-  <version>3.000</version>
+  <version>3.5.001</version>
 
   <dependencyManagement>
     <dependencies>

@@ -17,9 +17,7 @@ import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 @SuppressWarnings({"SpringFacetCodeInspection", "SpringJavaInjectionPointsAutowiringInspection"})
 @Configuration
@@ -38,7 +36,7 @@ class ServiceHealthAggregationConfiguration {
     @Bean
     @ConditionalOnMissingBean
     RestTemplateRegistry restTemplateRegistry(RestTemplateBuilder restTemplateBuilder, HealthAggregatorRestTemplateBuilderConfigurer healthAggregatorRestTemplateConfigurer, HealthAggregatorProperties healthAggregatorProperties) {
-        Map<String,RestTemplate> restTemplatesPerService = new HashMap<>();
+        var registry = new RestTemplateRegistry();
         for (String service : healthAggregatorProperties.getNeededServices().keySet()) {
 
             final HealthAggregatorProperties.HttpServiceSettings timeoutsForService = healthAggregatorProperties.getHttp().getTimeoutsForService(service);
@@ -61,9 +59,9 @@ class ServiceHealthAggregationConfiguration {
                         }
                     })
                     .build();
-            restTemplatesPerService.put(service, restTemplate);
+            registry.setRestTemplateForService(service, restTemplate);
         }
-        return new RestTemplateRegistry(restTemplatesPerService);
+        return registry;
     }
 
     @Bean

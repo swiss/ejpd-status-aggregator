@@ -1,4 +1,4 @@
-#!groovy
+String upstream_projects = BRANCH_NAME == 'master' ? '' : 'ejpd-stack-spring/develop'
 
 pipeline {
   agent none
@@ -25,10 +25,19 @@ pipeline {
        }
      }
    }
-   options {
-     disableConcurrentBuilds()
-     buildDiscarder(logRotator(numToKeepStr:'10'))
-     // use normal time in logfile
-     timestamps()
-   }
+    post {
+        failure {
+            // sendNotifications always informs commiters, optionally a comma or whitespace seperated list can be passed to notify additional recipients
+            sendNotifications("***REMOVED***")
+        }
+    }
+    triggers {
+        upstream(upstreamProjects: upstream_projects, threshold: hudson.model.Result.SUCCESS)
+    }
+    options {
+        // keep the 10 most recent builds
+        buildDiscarder(logRotator(numToKeepStr:'10'))
+        // use normal time in logfile
+        timestamps()
+    }
  }

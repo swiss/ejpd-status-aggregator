@@ -2,17 +2,10 @@
 
 Library, welche die `/health` Endpoints von mehreren Systemen zusammenzieht und im `/health` Endpoint des aktuellen Systems darstellt.
 
-> Nur für Projekte Referenzarchitektur 4, sollte __nicht__ für Projekte mit Referenzarchitektur 5 (PaaS/Kubernetes) verwendet werden
-
-
 ### Hintergrund
 
 In der Referenzarchitektur 4 ist vorgesehen, Anwendungen aus mehreren Spring Boot Containern zu erstellen.
 Diese Container behandeln dabei je einen separaten Aspekt des Gesamtsystems und sind lose über eine ServiceRegistry gekoppelt.   
-
-### Dependencies
-
-Diese Library hat neben der Abhängigkeit auf `spring-boot-actuator` auch eine Abhängigkeit auf `spring-cloud-starter-eureka`. Beide Abhängigkeiten werden transitiv nachgezogen.
 
 ### Übersicht
 
@@ -22,7 +15,10 @@ Im Rahmen einer Spring Cloud Applikation wird ein Spring Boot Container als Heal
 
 ### Verwendung 
 
-Um den health-actuator-aggregator zu aktivieren, muss zuerst diese Library als dependency konfiguriert werden:
+Um den health-actuator-aggregator zu aktivieren, müssen diese Library als Dependencies konfiguriert werden.
+
+Achtung: 
+Unterschiedliche Dependencies für Projekte, die auf Kubernetes laufen (gegenüber Eureka), Spring DiscoveryClient muss die Infos aus unterschiedlichen Quellen holen
 
 ```xml
 [...]
@@ -31,9 +27,19 @@ Um den health-actuator-aggregator zu aktivieren, muss zuerst diese Library als d
     <artifactId>health-actuator-aggregator</artifactId>
     <version>0.1-SNAPSHOT</version>
 </dependency>
+<dependency>
+  <!-- Nur Arch V5 Projekte (PaaS) -->
+  <groupId>org.springframework.cloud</groupId>
+  <artifactId>spring-cloud-starter-kubernetes-fabric8</artifactId>
+</dependency>
+<dependency>
+  <!-- Nur Arch V4 Projekte (Eureka) -->
+  <groupId>org.springframework.cloud</groupId>
+  <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+</dependency>
 [...]
-
 ```
+
 
 Danach muss die Spring-Boot Applikation mit `@EnableServicesHealthAggregation` annotiert werden, damit der health aggregator aktiv wird:
 

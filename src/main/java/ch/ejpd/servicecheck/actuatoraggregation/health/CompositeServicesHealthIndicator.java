@@ -97,8 +97,13 @@ public class CompositeServicesHealthIndicator implements HealthIndicator {
 
     private Map<String,List<ServiceInstance>> fetchServiceInstancesForOwnZoneByDiscoveryClient() {
 
-        final List<String> neededServiceNames = neededServices.stream().map(NeededService::getServiceName).toList();
-        List<String> services =  discoveryClient.getServices().stream().filter(neededServiceNames::contains).toList();
+        final List<String> neededServiceNames = neededServices.stream()
+                .map(NeededService::getServiceName)
+                .map(String::toLowerCase)
+                .toList();
+        List<String> services =  discoveryClient.getServices().stream()
+                .filter(serviceName -> neededServiceNames.contains(serviceName.toLowerCase()))
+                .toList();
 
         Map<String,List<ServiceInstance>> serviceIdToInstancesMap = new HashMap<>();
 
