@@ -1,106 +1,126 @@
 package ch.ejpd.servicecheck.actuatoraggregation.health;
 
-import ch.ejpd.servicecheck.actuatoraggregation.DiscoveryClientMockBuilder;
-import ch.ejpd.servicecheck.actuatoraggregation.configuration.InstancesThreshold;
+import ch.ejpd.servicecheck.actuatoraggregation.configuration.HealthAggregatorProperties;
 import ch.ejpd.servicecheck.actuatoraggregation.restclient.HealthInfoClient;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.springframework.boot.actuate.health.Health;
-import org.springframework.boot.actuate.health.OrderedHealthAggregator;
 import org.springframework.boot.actuate.health.Status;
+import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
-import static java.util.Collections.singletonList;
-import static org.junit.Assert.assertEquals;
+import static ch.ejpd.servicecheck.actuatoraggregation.DicoveryClientMockBuilder.discoveryClientWith;
+import static ch.ejpd.servicecheck.actuatoraggregation.ServiceInstanceMockBuilder.instance;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatExceptionOfType;
 import static org.mockito.Mockito.*;
 
 public class CompositeServicesHealthIndicatorTest {
 
 
-    private static HashMap<String,Object> STATUS_UP_MAP = new HashMap<>();
+    private static HashMap<String, Object> statusUpMap = new HashMap<>();
+
     static {
-        STATUS_UP_MAP.put("status", "UP");
+        statusUpMap.put("status", "UP");
     }
 
 
     @Test
-    public void healthIsConsideredDown_ifDiscoveryClient_returnsNullForServices() {
+    void healthIsConsideredDown_ifDiscoveryClient_returnsNullForServices() {
         final DiscoveryClient discoveryClientMock = mock(DiscoveryClient.class);
-        final CompositeServicesHealthIndicator compositeServicesHealthIndicator = new CompositeServicesHealthIndicator("zone1",  true, singletonList("service1"), discoveryClientMock, mock(HealthInfoClient.class), createThresholdsMap(), new OrderedHealthAggregator());
+        final HealthAggregatorProperties.HttpSettings httpSettings = new HealthAggregatorProperties.HttpSettings();
+        final CompositeServicesHealthIndicator compositeServicesHealthIndicator = new CompositeServicesHealthIndicator("zone1",
+                true, Map.of("service1", 1), discoveryClientMock, mock(HealthInfoClient.class), httpSettings, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator());
 
         final Health health = compositeServicesHealthIndicator.health();
 
-        assertEquals(Status.DOWN, health.getStatus());
+        assertThat(health.getStatus()).isEqualTo(Status.DOWN);
     }
 
     @Test
-    public void healthIsConsideredDown_ifDiscoveryClient_returnsEmptyListForServices() {
+    void healthIsConsideredDown_ifDiscoveryClient_returnsEmptyListForServices() {
+        final HealthAggregatorProperties.HttpSettings httpSettings = new HealthAggregatorProperties.HttpSettings();
         final DiscoveryClient discoveryClientMock = mock(DiscoveryClient.class);
         when(discoveryClientMock.getServices()).thenReturn(new ArrayList<>());
-        final CompositeServicesHealthIndicator compositeServicesHealthIndicator = new CompositeServicesHealthIndicator("zone1", true, singletonList("service1"), discoveryClientMock, mock(HealthInfoClient.class), createThresholdsMap(), new OrderedHealthAggregator());
+        final CompositeServicesHealthIndicator compositeServicesHealthIndicator = new CompositeServicesHealthIndicator("zone1", true,
+                Map.of("service1", 1), discoveryClientMock, mock(HealthInfoClient.class), httpSettings, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator());
 
         final Health health = compositeServicesHealthIndicator.health();
 
-        assertEquals(Status.DOWN, health.getStatus());
+        assertThat(health.getStatus()).isEqualTo(Status.DOWN);
     }
 
 
     @Test
-    public void healthIsConsideredUp_forSingleServiceInstanceThatIsUp() {
-        final DiscoveryClient discoveryClientMock
-                = new DiscoveryClientMockBuilder().service("service1").withInstance("instanceA").add().build();
+    void healthIsConsideredUp_forSingleServiceInstanceThatIsUp() {
+        final ServiceInstance instance = instance("service1", "instanceA");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(
+                instance
+        );
+
+        final HealthAggregatorProperties.HttpSettings httpSettings = new HealthAggregatorProperties.HttpSettings();
         final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
-        when(healthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(STATUS_UP_MAP);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance))).thenReturn(statusUpMap);
 
-        final Health health = new CompositeServicesHealthIndicator("defaultZone", true, singletonList("service1"), discoveryClientMock, healthInfoClientMock, createThresholdsMap(), new OrderedHealthAggregator()).health();
+        final Health health = new CompositeServicesHealthIndicator("defaultZone", true, Map.of("service1", 1), discoveryClientMock, healthInfoClientMock, httpSettings, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
 
-        assertEquals(Status.UP, health.getStatus());
+        assertThat(health.getStatus()).isEqualTo(Status.UP);
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void exceptionThrown_whenTheServiceInstance_hasNoZoneInformation() {
-        final DiscoveryClient discoveryClientMock
-                = new DiscoveryClientMockBuilder().service("service1").withInstance("instanceA").inZone(null).add().build();
+    @Test
+    void exceptionThrown_whenTheServiceInstance_hasNoZoneInformation() {
+        assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+            final HealthAggregatorProperties.HttpSettings httpSettings = new HealthAggregatorProperties.HttpSettings();
 
-        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
-        when(healthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(STATUS_UP_MAP);
+            final ServiceInstance instance = instance("service1", "instanceA", null);
+            final DiscoveryClient discoveryClientMock
+                    = discoveryClientWith(instance);
 
-        new CompositeServicesHealthIndicator("defaultZone", true, singletonList("service1"), discoveryClientMock, healthInfoClientMock, createThresholdsMap(), new OrderedHealthAggregator()).health();
-    }
+            final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+            when(healthInfoClientMock.getHealthInfoMap(instance)).thenReturn(statusUpMap);
 
-
-    @Test(expected = IllegalArgumentException.class)
-    public void compositeServicesHealthIndicator_throwsException_whenNoZoneInformationIsPresent() {
-        final DiscoveryClient discoveryClientMock
-                = new DiscoveryClientMockBuilder().service("service1").withInstance("instanceA").add().build();
-
-        new CompositeServicesHealthIndicator(null, true, singletonList("service1"), discoveryClientMock, mock(HealthInfoClient.class), createThresholdsMap(), new OrderedHealthAggregator()).health();
+            new CompositeServicesHealthIndicator("defaultZone", true, Map.of("service1", 1), discoveryClientMock, healthInfoClientMock, httpSettings, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
+        });
     }
 
 
     @Test
-    public void healthFromOtherRegistryZone_isIgnored() {
-        final DiscoveryClient discoveryClientMock = new DiscoveryClientMockBuilder()
-                .service("service1")
-                .withInstance("instanceA").inZone("zoneA")
-                .withInstance("instanceB").inZone("zoneB")
-                .add().build();
+    void compositeServicesHealthIndicator_throwsException_whenNoZoneInformationIsPresent() {
+        assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+            final HealthAggregatorProperties.HttpSettings httpSettings = new HealthAggregatorProperties.HttpSettings();
+
+            final DiscoveryClient discoveryClientMock
+                    = discoveryClientWith(
+                    instance("service1", "instanceA")
+            );
+
+            new CompositeServicesHealthIndicator(null, true, Map.of("service1", 1), discoveryClientMock, mock(HealthInfoClient.class), httpSettings, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
+        });
+    }
+
+
+    @Test
+    void healthFromOtherRegistryZone_isIgnored() {
+        final HealthAggregatorProperties.HttpSettings httpSettings = new HealthAggregatorProperties.HttpSettings();
+
+        final ServiceInstance instance1 = instance("service1", "instanceA", "zoneA");
+        final ServiceInstance instance2 = instance("service1", "instanceB", "zoneB");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(
+                instance1,
+                instance2
+        );
 
         final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
-        when(healthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(STATUS_UP_MAP);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1))).thenReturn(statusUpMap);
 
-        final Health health = new CompositeServicesHealthIndicator("zoneA", true, singletonList("service1"), discoveryClientMock, healthInfoClientMock, createThresholdsMap(), new OrderedHealthAggregator()).health();
+        new CompositeServicesHealthIndicator("zoneA", true, Map.of("service1", 1), discoveryClientMock, healthInfoClientMock, httpSettings, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
 
-        verify(healthInfoClientMock, times(1)).getHealthInfoMap("http://service1instanceA/health");
+        verify(healthInfoClientMock, times(1)).getHealthInfoMap(eq(instance1));
         verifyNoMoreInteractions(healthInfoClientMock);
     }
 
-
-    private Map<String,InstancesThreshold> createThresholdsMap() {
-        return new HashMap<>();
-    }
 
 }

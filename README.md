@@ -2,10 +2,13 @@
 
 Library, welche die `/health` Endpoints von mehreren Systemen zusammenzieht und im `/health` Endpoint des aktuellen Systems darstellt.
 
+> Nur für Projekte Referenzarchitektur 4, sollte __nicht__ für Projekte mit Referenzarchitektur 5 (PaaS/Kubernetes) verwendet werden
+
 
 ### Hintergrund
 
-In der Referenzarchitektur 4 ist vorgesehen, Anwendungen aus mehreren Spring Boot Containern zu erstellen. Diese Container behandeln dabei je einen separaten Aspekt des Gesamtsystems und sind lose über eine ServiceRegistry gekoppelt.   
+In der Referenzarchitektur 4 ist vorgesehen, Anwendungen aus mehreren Spring Boot Containern zu erstellen.
+Diese Container behandeln dabei je einen separaten Aspekt des Gesamtsystems und sind lose über eine ServiceRegistry gekoppelt.   
 
 ### Dependencies
 
@@ -75,82 +78,109 @@ In diesem Beispiel werden SERVICE_A und SERVICE_B überwacht, wobei ersterer ein
 Ohne weitere Konfiguration (siehe Abschnitt Konfiguration) wird der Status wie folgt propagiert:
 
 1. Eine Service-Instanz hat den Status, welcher vom /health Endpoint der Instanz zurückgegeben worden ist.
-2. Ein Service hat **Status UP**, wenn **mindestens eine** Instanz Status UP hat. Sonst hat der Serivce **Status DOWN**.
-3. aggregatedServices hat den schlimmsten Status aller Services. Damit hat dieser Abschnitt dasselbe Verhalten wie der [OrderedHealthAggregator](https://github.com/spring-projects/spring-boot/blob/v1.5.6.RELEASE/spring-boot-actuator/src/main/java/org/springframework/boot/actuate/health/OrderedHealthAggregator.java),
+2. Ein Service hat den Status wie im Kapitel `Mindestanzahl Instanzen / Service` erklärt: UP wenn alle Instanzen UP sind, DOWN wenn alle Instanzen DOWN (oder keine verfügbar) sind, sonst WARNING.
+3. aggregatedServices hat ohne weitere Konfiguration den schlimmsten Status aller Services. Damit hat dieser Abschnitt dasselbe Verhalten wie der [OrderedHealthAggregator](https://github.com/spring-projects/spring-boot/blob/v1.5.6.RELEASE/spring-boot-actuator/src/main/java/org/springframework/boot/actuate/health/OrderedHealthAggregator.java),
 welcher Spring Boot per Default verwendet, um den Gesamtstatus aus allen Komponenten zu errechnen. 
             
+##### Eigener AggregatedServices-Status
 
+Um den Gesamtstatus der Applikation zu übersteuern kann ein Spring-Bean erstellt werden, welches das Interface [ApplicationStatusAggregator](.src/main/java/ch/ejpd/servicecheck/actuatoraggregation/health/ApplicationStatusAggregator.java) implementiert. 
+
+Ein Beispiel:
+
+```java
+import ch.ejpd.servicecheck.actuatoraggregation.health.ApplicationStatusHealthAggregator;
+
+@Component
+public class MyApplicationStatusAggregator implements ApplicationStatusHealthAggregatorAggregator { 
+    
+    @Override
+    Status aggregateApplicationStatus(Map<String, Health> servicesStatus) {
+        [...]
+    }
+
+
+}
+```
+
+Die per default verwendete Implementation des Application [ApplicationStatusAggregator](.src/main/java/ch/ejpd/servicecheck/actuatoraggregation/health/ApplicationStatusAggregator.java) verwendet einen [OrderedHealthAggregator](https://github.com/spring-projects/spring-boot/blob/v1.5.6.RELEASE/spring-boot-actuator/src/main/java/org/springframework/boot/actuate/health/OrderedHealthAggregator.java) 
+mit den Status 
+
+* DOWN
+* OUT_OF_SERVICE
+* WARNING
+* UP
+* UNKNOWN
+
+Wenn nur diese Reihenfolge angepasst werden soll kann dies auch über die Konfiguration erfolgen. Zum Beispiel: 
+
+```yml
+management:
+  health:
+    status:
+      order: DOWN, WARNING, UP
+```
+  
 
 
 ### Konfiguration 
 
 ##### Service-Liste
 
-Da der health aggregator die Informationen zu den konkreten Service-Instanzen aus einer Service-Registry bezieht, muss die Spring-Boot-Applikation, welche die Aggregierung machen soll, natürlich korrekt als DiscoveryClient konfiguriert sein. Als Beispiel dafür kann [example-spring-cloud](https://repo.isc-ejpd.admin.ch/stash/projects/EXAMPLES/repos/example-spring-cloud/browse) dienen.  
+Da der health aggregator die Informationen zu den konkreten Service-Instanzen aus einer Service-Registry bezieht, muss die Spring-Boot-Applikation, 
+welche die Aggregierung machen soll, natürlich korrekt als DiscoveryClient konfiguriert sein. Als Beispiel dafür kann [example-spring-cloud](https://repo.isc-ejpd.admin.ch/stash/projects/EXAMPLES/repos/example-spring-cloud/browse) dienen.  
 
-Um die Health-Information der Services zu integrieren ist es ausserdem nötig, die Service-Namen als Liste zu konfigurieren. Ohne diese Konfiguration kann der health aggregator allfällige Services, zu welchen es keine aktiven Instanzen gibt, nicht identifizieren und somit keine Aussage machen, ob das Gesamtsystem gesund ist.
+Um die Health-Information der Services zu integrieren ist es ausserdem nötig, die Service-Namen als Liste zu konfigurieren. Ohne diese Konfiguration kann der health aggregator allfällige Services, 
+zu welchen es keine aktiven Instanzen gibt, nicht identifizieren und somit keine Aussage machen, ob das Gesamtsystem gesund ist.
 
 Dazu definiert man in der Spring Boot Konfiguration (z.B. application.yml) folgendes:
 
 ```yml
 healthaggregator:
   neededServices:
-    - DATABASE-SERVICE
-    - BATCH-SERVICE
-    - APPLICATION-EDGE-SERVICE
-    - CACHE-SERVICE
+    DATABASE-SERVICE: 1
+    BATCH-SERVICE: 2
+    APPLICATION-EDGE-SERVICE: 1
+    CACHE-SERVICE: 3
 ```
+
+
+
+Die Zahlen nach dem Service-Name entsprechen der Anzahl Instanzen, welche pro Service benötigt sind.
 
 ##### Mindestanzahl Instanzen / Service
 
-Der Status eines Services setzt sich aus den Status seiner Instanzen zusammen: Er ist dann UP, wenn mindestens eine Instanz UP ist. 
+Der Status eines Services setzt sich aus den Status seiner Instanzen zusammen. Ohne weitere Anpassung gelten hierfür die folgenden Regeln:
+
+* Wenn alle benötigten Instanzen UP sind, ist der Service UP. 
+* Wenn 0 Instanzen DOWN sind, ist der Service DOWN.
+* Ansonsten hat der Service den Status WARNING. 
 
 In manchen Fällen ist es Sinnvoll, diesen Mechanismus zu übersteuern. Gründe dafür können sein:
 
 - Ein bestimmter Service ist überhaupt nicht wichtig für das Gesamtsystem, und ein Ausfall aller Instanzen ist nicht weiter schlimm.
 - Ein Service braucht mindestens n gesunde Instanzen, damit die User Experience nicht furchtbar schlecht wird.
 
-Um solche Fälle abzudecken kann pro überwachter Service sogenannte `threshold`- Werte definiert werden. Dabei handelt es sich um eine Map zwischen einem Status und der Anzahl Instanzen. 
-Als Key dieser Map wird der Status abgelegt, der Wert ist die **minimale** Anzahl Instanzen, welche zu diesem Status führen. 
-
+Um solche Fälle abzudecken kann ein Bean zur Verfügung gestellt werden, welches [ServiceStatusAggregator](.src/main/java/ch/ejpd/servicecheck/actuatoraggregation/health/ServiceStatusAggregator.java) implementiert. 
 
 Ein Beispiel:
 
+```java
+@Component
+public class MyServiceStatusAggregator implements ServiceStatusAggregator { 
+    
+    @Override
+    public Status aggregateServiceStatus(NeededService neededService, List<Status> status) {
+        [...]
+    }
 
-```yml
-healthaggregator:
-  neededServices:
-    - DATABASE-SERVICE
-    - BATCH-SERVICE
-    - APPLICATION-EDGE-SERVICE
-    - CACHE-SERVICE
-    thresholds:
-        CACHE-SERVICE:
-            UP: 0
-        DATABASE-SERVICE:
-            OUT_OF_SERVICE: 1
-            UP: 3       
-        APPLICATION-EDGE-SERVICE:
-            DOWN: 0
-            UP: 1
-            UNKNOWN: 2
-          
+}
 ```
 
-In diesem Beispiel wird der CACHE-SERVICE auf UP bei mindestens 0 Instanzen gesetzt. Das heisst, bei jeder Anzahl Instanzen beeinträchtigt der CACHE-SERVICE den health check nicht.
-
-Der DATABASE-SERVICE hingegen braucht mindestens 3 Instanzen, damit der Service UP ist. Bei 1 oder 2 Instanzen wäre dieser OUT_OF_SERVICE, bei 0 Instanzen DOWN.
-
-Der APPLICATION-EDGE-SERVICE ist DOWN bei 0 Instanzen (dieser Eintrag hätte auch weggelassen werden können, da default), UP bei 1 und UNKNOWN bei 2 Instanzen. 
+Der Parameter neededService kapselt den Service-Namen und die benötigte Anzahl Instanzen aus der Konfiguration. Die 
+Liste der Instanz-Status beinhaltet die Status der einzelnen Instanzen.  
 
 
-Das Implizite Default-Mapping aller Services ist also:
-
-* DOWN: 0
-* UP: 1
-
-
-Widersprüchliche Konfigurationen (z.B. Zuordnen von 2 unterschiedlichen Status bei 1 Instanz) werden bereits beim Aufstarten des Spring Boot Containers mit einer Exception quittiert. 
 
 
 
@@ -184,4 +214,46 @@ Mit dem Property  `healthaggregator.registryzone` kann die Zone übersteuert wer
    registryzone: EineAndereZone      
  ```
 
-  
+##### HTTP Settings
+
+Der health-actuator-aggregator verwendet ein `RestTemplate`, um die Health-Endpoints der Service-Instanzen abzuholen. Für diese ausgehende Kommunikation stehen die folgenden Konfigurationen zur Verfügung:
+
+- Connection Timeout
+- Read Timeout
+
+Die Konfiguration der Timeouts ist optional. Per default wird von einem Connect- und Read-Timeout von **500 Millisekunden** ausgegangen.
+Die Timeouts können sowohl global (für alle Services) als auch per Service-Instanz konfiguriert werden:
+
+```yml
+healthaggregator:
+  http:
+    default-read-timeout-milliseconds: 200
+    default-connection-timeout-milliseconds: 200
+    services:
+      FOO:
+        read-timeout-milliseconds: 1100
+        connection-timeout-milliseconds: 800
+```
+
+Für Services, welche keine spezifischen Timeouts konfiguriert haben, gelten die Properties `default-read-timeout-millliseconds` resp. `default-connection-timeout-milliseconds`.
+
+##### Weiterführende Konfiguration des Http-Clients
+
+Der health-actuator-aggregator verwendet intern den Spring Boot `RestTemplateBuilder`, um die Health-Informationen aus den Service-Instanzen zu lesen. 
+Pro konfigurierten Service wird aus dem `RestTemplateBuilder` ein `RestTemplate` ertstellt, welches den Http-Call durchführt. 
+
+Sollte es nötig sein, weitergehende Konfigurationen für den health-actuator-aggregator vorzunehmen, können Applikationen ein Bean bereitstellen, welches in die Konfiguration des `RestTemplateBuilder` eingreiffen kann. 
+Dieses Bean ist vom Typ `HealthAggregatorRestTemplateBuilderConfigurer`. Das folgende Beispiel registriert einen Interceptor:
+
+```java
+@Bean
+HealthAggregatorRestTemplateBuilderConfigurer healthAggregatorRestTemplateBuilderConfigurer() {
+    return restTemplateBuilder -> restTemplateBuilder.interceptors(new MyInterceptor());
+}
+
+```
+
+Allfällige `HealthAggregatorRestTemplateBuilderConfigurer` werden berücksichtigt **BEVOR** die Timeout-Konfigurationen im obigen Kapitel konfiguriert werden. 
+Dadurch kann es sein, dass ein Setzen von Connecton- und Read-Timeouts mittels `HealthAggregatorRestTemplateBuilderConfigurer` keinen Effekt haben.
+
+

@@ -1,20 +1,27 @@
 package ch.ejpd.servicecheck.actuatoraggregation.configuration;
 
-import ch.ejpd.servicecheck.actuatoraggregation.health.CompositeServicesHealthIndicator;
+import ch.ejpd.servicecheck.actuatoraggregation.health.*;
 import ch.ejpd.servicecheck.actuatoraggregation.restclient.HealthInfoClient;
+import ch.ejpd.servicecheck.actuatoraggregation.restclient.RestTemplateRegistry;
 import ch.ejpd.servicecheck.applicationcheckproperties.configuration.EnableServiceCheckFileWriter;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.actuate.health.OrderedHealthAggregator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.web.client.ResponseErrorHandler;
+import org.springframework.web.client.RestTemplate;
 
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
-@SuppressWarnings("SpringFacetCodeInspection")
+@SuppressWarnings({"SpringFacetCodeInspection", "SpringJavaInjectionPointsAutowiringInspection"})
 @Configuration
 @EnableConfigurationProperties(HealthAggregatorProperties.class)
 @EnableDiscoveryClient
@@ -23,17 +30,73 @@ class ServiceHealthAggregationConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    HealthInfoClient healthInfoClient() {
-        return new HealthInfoClient();
+    HealthInfoClient healthInfoClient(RestTemplateRegistry restTemplateRegistry) {
+        return new HealthInfoClient(restTemplateRegistry);
     }
+
+
+    @Bean
+    @ConditionalOnMissingBean
+    RestTemplateRegistry restTemplateRegistry(RestTemplateBuilder restTemplateBuilder, HealthAggregatorRestTemplateBuilderConfigurer healthAggregatorRestTemplateConfigurer, HealthAggregatorProperties healthAggregatorProperties) {
+        Map<String,RestTemplate> restTemplatesPerService = new HashMap<>();
+        for (String service : healthAggregatorProperties.getNeededServices().keySet()) {
+
+            final HealthAggregatorProperties.HttpServiceSettings timeoutsForService = healthAggregatorProperties.getHttp().getTimeoutsForService(service);
+            final Duration connectionTimeoutMilliseconds = Duration.ofMillis(timeoutsForService.getConnectionTimeoutMilliseconds());
+            final Duration readTimeoutMilliseconds = Duration.ofMillis(timeoutsForService.getReadTimeoutMilliseconds());
+
+            final RestTemplateBuilder configuredRestTemplateBuilder = healthAggregatorRestTemplateConfigurer.configure(restTemplateBuilder);
+            final RestTemplate restTemplate = configuredRestTemplateBuilder
+                    .setReadTimeout(readTimeoutMilliseconds)
+                    .setConnectTimeout(connectionTimeoutMilliseconds)
+                    .errorHandler(new ResponseErrorHandler() {
+                        @Override
+                        public boolean hasError(ClientHttpResponse response) {
+                            return false;
+                        }
+
+                        @Override
+                        public void handleError(ClientHttpResponse response) {
+
+                        }
+                    })
+                    .build();
+            restTemplatesPerService.put(service, restTemplate);
+        }
+        return new RestTemplateRegistry(restTemplatesPerService);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    HealthAggregatorRestTemplateBuilderConfigurer healthAggregatorRestTemplateBuilderConfigurer() {
+        return (restTemplateBuilder) -> restTemplateBuilder;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    ApplicationStatusHealthAggregator applicationStatusHealthAggregator(
+            @Value("${management.endpoint.health.status.order:#{null}}") List<String> statusOrder
+    ) {
+        return DefaultApplicationStatusHealthAggregator.createFrom(statusOrder);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    ServiceStatusAggregator serviceStatusAggregator() {
+        return new DefaultServiceStatusAggregator();
+    }
+
 
     @Bean
     @ConditionalOnMissingBean
     CompositeServicesHealthIndicator aggregatedServices(
             @Value("${healthaggregator.registryzone:${eureka.instance.metadataMap.zone:#{null}}}") String myRegistryZone,
-            HealthAggregatorProperties properties, @SuppressWarnings("SpringJavaAutowiringInspection") DiscoveryClient discoveryClient, HealthInfoClient healthInfoClient, OrderedHealthAggregator orderedHealthAggregator) {
-        final Map<String,InstancesThreshold> stringInstancesThresholdMap = properties.thresholdMap();
-        return new CompositeServicesHealthIndicator(myRegistryZone, properties.isIgnoreOtherRegistryZones(), properties.getNeededServices(), discoveryClient, healthInfoClient, stringInstancesThresholdMap, orderedHealthAggregator);
+            HealthAggregatorProperties properties,
+            @SuppressWarnings("SpringJavaAutowiringInspection") DiscoveryClient discoveryClient,
+            HealthInfoClient healthInfoClient,
+            ApplicationStatusHealthAggregator applicationStatusHealthAggregator,
+            ServiceStatusAggregator serviceStatusAggregator) {
+        return new CompositeServicesHealthIndicator(myRegistryZone, properties.isIgnoreOtherRegistryZones(), properties.getNeededServices(), discoveryClient, healthInfoClient, properties.getHttp(), applicationStatusHealthAggregator, serviceStatusAggregator);
     }
 
 }

@@ -7,12 +7,12 @@
   <parent>
     <artifactId>stack-spring</artifactId>
     <groupId>isc-ejpd-pom</groupId>
-    <version>2.003</version>
+    <version>3.000</version>
   </parent>
 
   <groupId>isc-ejpd-library</groupId>
   <artifactId>ejpd-health-actuator-aggregator</artifactId>
-  <version>2.000</version>
+  <version>3.000</version>
 
   <dependencyManagement>
     <dependencies>
@@ -29,7 +29,7 @@
   <dependencies>
     <dependency>
       <groupId>org.springframework.cloud</groupId>
-      <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+      <artifactId>spring-cloud-starter</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -37,16 +37,22 @@
     </dependency>
     <dependency>
       <groupId>isc-ejpd-library</groupId>
-      <artifactId>ejpd-servicecheck-file-writer</artifactId>
+      <artifactId>ejpd-servicecheck-filewriter</artifactId>
+    </dependency>
+    <dependency>
+      <!-- muss seit spring 2.3 explizit eingebunden werden -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-configuration-processor</artifactId>
       <optional>true</optional>
     </dependency>
+
     <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -55,9 +61,18 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>com.shazam</groupId>
-      <artifactId>shazamcrest</artifactId>
-      <version>0.11</version>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-test</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

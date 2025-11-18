@@ -6,12 +6,13 @@ pipeline {
      stage("build") {
        agent {
          docker {
-           image "ejpd/maven:3.5-jdk8"
+           image "ejpd/maven:3-openjdk21-ubuntu"
            args "-v /home/jenkins:/home/jenkins -v /data/iscpkg:/data/iscpkg"
          }
        }
        steps {
          mvnBuild()
+         sonarScan()
        }
        post {
          always {

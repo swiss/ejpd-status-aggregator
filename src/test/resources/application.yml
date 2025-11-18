@@ -1,0 +1,39 @@
+server:
+  port: 49152
+
+spring:
+  application:
+    name: health-aggregator-sample
+
+servicecheck:
+  file:
+    directory: /tmp
+
+eureka:
+  client:
+    enabled: false
+  instance:
+    metadataMap:
+      zone: default
+
+
+healthaggregator:
+  needed-services:
+    FOO: 1
+    BAR: 1
+  http:
+    default-read-timeout-milliseconds: 200
+    default-connection-timeout-milliseconds: 1500
+    services:
+      FOO:
+        read-timeout-milliseconds: 320
+        connection-timeout-milliseconds: 100
+management:
+  endpoint:
+    health:
+      show-details: always
+      status:
+        # Zusätzlicher Status WARNING
+        order: DOWN, OUT_OF_SERVICE, WARNING, UP, UNKNOWN
+
+

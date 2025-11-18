@@ -10,7 +10,7 @@ class ServiceHealthAggregationImportSelector implements DeferredImportSelector {
 
     @Override
     public String[] selectImports(AnnotationMetadata metadata) {
-        return new String [] {
+        return new String[]{
                 ServiceHealthAggregationConfiguration.class.getCanonicalName()
         };
 

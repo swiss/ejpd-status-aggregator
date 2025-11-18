@@ -1,23 +1,26 @@
 package ch.ejpd.servicecheck.actuatoraggregation.configuration;
 
-import ch.ejpd.servicecheck.actuatoraggregation.DiscoveryClientMockBuilder;
+import ch.ejpd.servicecheck.actuatoraggregation.health.DefaultApplicationStatusHealthAggregator;
+import ch.ejpd.servicecheck.actuatoraggregation.health.DefaultServiceStatusAggregator;
 import ch.ejpd.servicecheck.actuatoraggregation.restclient.HealthInfoClient;
-import org.hamcrest.Description;
-import org.hamcrest.Matcher;
-import org.hamcrest.TypeSafeMatcher;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.springframework.boot.actuate.health.Health;
-import org.springframework.boot.actuate.health.OrderedHealthAggregator;
 import org.springframework.boot.actuate.health.Status;
+import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
 
-import java.util.Arrays;
+import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import static com.shazam.shazamcrest.MatcherAssert.assertThat;
-import static com.shazam.shazamcrest.matcher.Matchers.sameBeanAs;
+import static ch.ejpd.servicecheck.actuatoraggregation.DicoveryClientMockBuilder.discoveryClientWith;
+import static ch.ejpd.servicecheck.actuatoraggregation.ServiceInstanceMockBuilder.instance;
+import static ch.ejpd.servicecheck.actuatoraggregation.health.StatusList.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -35,272 +38,280 @@ public class ServiceHealthAggregationConfigurationTest {
 
 
     @Test
-    public void twoServicesOneInstanceEachAllUp() {
+    void twoServicesOneInstanceEachAllUp() {
 
-        final DiscoveryClient discoveryClientMock = new DiscoveryClientMockBuilder()
-                .service("service1")
-                .withInstance("instanceA")
-                .add()
-                .service("service2")
-                .withInstance("instanceA")
-                .add()
-                .build();
+        final ServiceInstance instance1 = instance("service1", "instanceA");
+        final ServiceInstance instance2 = instance("service2", "instanceA");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instance1, instance2);
 
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1))).thenReturn(HEALTH_CHECK_RESULT_UP);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance2))).thenReturn(HEALTH_CHECK_RESULT_UP);
 
-        final HealthInfoClient mhealthInfoClientMock = mock(HealthInfoClient.class);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service2instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone", createProperties("service1", "service2"),
+                discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
 
-        final Health health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone", createProperties("service1", "service2"), discoveryClientMock, mhealthInfoClientMock, new OrderedHealthAggregator()).health();
-
-        assertThat(health, sameBeanAs(new Health.Builder().up()
-                .withDetail("SERVICE2", new Health.Builder().up()
+        var expected = new Health.Builder().up()
+                .withDetail("service2", new Health.Builder().up()
                         .withDetail("instance-0", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service2instanceA/health")
+                                .withDetail("healthCheckUrl", URI.create("http://service2instanceA:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
                                 .build())
                         .build())
-                .withDetail("SERVICE1", new Health.Builder().up()
+                .withDetail("service1", new Health.Builder().up()
                         .withDetail("instance-0", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service1instanceA/health")
-                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
-                                .build()).build())
-                .build()
-        ));
-    }
-
-
-    @Test
-    public void servicesExpected_butNotPresentInRegistry_areMarkedAsDown() {
-
-        final DiscoveryClient discoveryClientMock = new DiscoveryClientMockBuilder()
-                .service("service1")
-                .withInstance("instanceA")
-                .add()
-                .build();
-
-
-        final HealthInfoClient mhealthInfoClientMock = mock(HealthInfoClient.class);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service2instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-
-        final Health health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone",createProperties("service1", "service2"), discoveryClientMock, mhealthInfoClientMock, new OrderedHealthAggregator()).health();
-
-        assertThat(health, sameBeanAs(new Health.Builder().down()
-                .withDetail("SERVICE1", new Health.Builder().up()
-                        .withDetail("instance-0", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service1instanceA/health")
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceA:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
                                 .build())
                         .build())
-                .withDetail("SERVICE2", new Health.Builder().down()
-                        .withDetail("error", "There is no available instance of service SERVICE2 in the service registry!")
+                .build();
+        assertThat(health).isEqualTo(expected);
+    }
+
+
+    @Test
+    void twoServicesOneInstanceEachAllUp_withCustomApplicationStateAggregator() {
+
+        final ServiceInstance instance1 = instance("service1", "instanceA");
+        final ServiceInstance instance2 = instance("service2", "instanceA");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instance1, instance2);
+
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1))).thenReturn(HEALTH_CHECK_RESULT_UP);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance2))).thenReturn(HEALTH_CHECK_RESULT_UP);
+
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone", createProperties("service1", "service2"),
+                discoveryClientMock, healthInfoClientMock, (map) -> new Status("CustomStatus"), new DefaultServiceStatusAggregator()).health();
+
+        var expected = new Health.Builder().status("CustomStatus")
+                .withDetail("service2", new Health.Builder().up()
+                        .withDetail("instance-0", new Health.Builder().up()
+                                .withDetail("healthCheckUrl", URI.create("http://service2instanceA:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
+                                .build()).build())
+                .withDetail("service1", new Health.Builder().up()
+                        .withDetail("instance-0", new Health.Builder().up()
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceA:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
+                                .build()).build())
+                .build();
+        assertThat(health).isEqualTo(expected);
+    }
+
+
+    @Test
+    void servicesExpected_butNotPresentInRegistry_areMarkedAsDown() {
+
+        final ServiceInstance instance = instance("service1", "instanceA");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instance);
+
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance))).thenReturn(HEALTH_CHECK_RESULT_UP);
+
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone", createProperties("service1", "service2"),
+                discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
+
+        var expected = new Health.Builder().down()
+                .withDetail("service1", new Health.Builder().up()
+                        .withDetail("instance-0", new Health.Builder().up()
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceA:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
+                                .build())
                         .build())
-                .build()
-        ));
+                .withDetail("service2", new Health.Builder().down()
+                        .withDetail("error", "There is no available instance of service service2 in the service registry!")
+                        .build())
+                .build();
+        assertThat(health).isEqualTo(expected);
     }
 
 
     @Test
-    public void overallStateIsUp_ifAtLeasOneInstancePerService_isUp() {
+    void overallStateIsUp_ifAtLeasOneInstancePerService_isUp() {
 
-        final DiscoveryClient discoveryClientMock = new DiscoveryClientMockBuilder()
-                .service("service1")
-                .withInstance("instanceA")
-                .withInstance("instanceB")
-                .add()
-                .build();
-
-
-        final HealthInfoClient mhealthInfoClientMock = mock(HealthInfoClient.class);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_DOWN);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceB/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-
-        final Health health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone",createProperties("service1"), discoveryClientMock, mhealthInfoClientMock, new OrderedHealthAggregator()).health();
-
-
-        assertThat(health, statusIs(Status.UP));
-        assertThat(health, sameBeanAs(new Health.Builder().up()
-                .withDetail("SERVICE1", new Health.Builder().up()
-                        .withDetail("instance-0", new Health.Builder().down()
-                                .withDetail("healthCheckUrl", "http://service1instanceA/health")
-                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
-                                .build()).withDetail("instance-1", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service1instanceB/health")
-                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
-                                .build()).build())
-                .build())
-
-        );
-    }
-
-
-    @Test
-    public void overallStateIsDown_ifAllInstancesForAService_areDown() {
-
-        final DiscoveryClient discoveryClientMock = new DiscoveryClientMockBuilder()
-                .service("service1")
-                .withInstance("instanceA")
-                .withInstance("instanceB")
-                .add()
-                .service("service2")
-                .withInstance("instanceA")
-                .add()
-                .build();
-
-
-        final HealthInfoClient mhealthInfoClientMock = mock(HealthInfoClient.class);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_DOWN);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceB/health")).thenReturn(HEALTH_CHECK_RESULT_DOWN);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service2instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-
-        final Health health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone",createProperties("service1", "service2"), discoveryClientMock, mhealthInfoClientMock, new OrderedHealthAggregator()).health();
-
-
-        Assert.assertThat(health, statusIs(Status.DOWN));
-        assertThat(health, sameBeanAs(new Health.Builder().down()
-                .withDetail("SERVICE1", new Health.Builder().down()
-                        .withDetail("instance-0", new Health.Builder().down()
-                                .withDetail("healthCheckUrl", "http://service1instanceA/health")
-                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
-                                .build()).withDetail("instance-1", new Health.Builder().down()
-                                .withDetail("healthCheckUrl", "http://service1instanceB/health")
-                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
-                                .build()).build())
-                .withDetail("SERVICE2", new Health.Builder().up()
-                        .withDetail("instance-0", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service2instanceA/health")
-                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
-                                .build()
-                        ).build()
-
-                ).build()));
-    }
-
-
-
-    @Test
-    public void servicesNotIn_neededServices_areNotDisplayed() {
-
-        final DiscoveryClient discoveryClientMock = new DiscoveryClientMockBuilder()
-                .service("service1")
-                .withInstance("instanceA")
-                .add()
-                .service("service2")
-                .withInstance("instanceA")
-                .add()
-                .build();
-
+        final ServiceInstance instanceA = instance("service1", "instanceA");
+        final ServiceInstance instanceB = instance("service1", "instanceB");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instanceA, instanceB);
 
         final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
-        when(healthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-        when(healthInfoClientMock.getHealthInfoMap("http://service2instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instanceA))).thenReturn(HEALTH_CHECK_RESULT_DOWN);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instanceB))).thenReturn(HEALTH_CHECK_RESULT_UP);
 
-        final Health health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone",createProperties("service2"), discoveryClientMock, healthInfoClientMock, new OrderedHealthAggregator()).health();
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone", createProperties("service1"),
+                discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
 
-
-        assertThat(health, statusIs(Status.UP));
-        assertThat(health, sameBeanAs(new Health.Builder().up()
-                .withDetail("SERVICE2", new Health.Builder().up()
-                        .withDetail("instance-0", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service2instanceA/health")
-                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
-                                .build()
-                        ).build()
-
-                ).build()));
-    }
-
-
-    @Test
-    public void servicesWithCustomThresholds() {
-
-        final DiscoveryClient discoveryClientMock = new DiscoveryClientMockBuilder()
-                .service("service1")
-                .withInstance("instanceA")
-                .withInstance("instanceB")
-                .withInstance("instanceC")
-                .add()
-                .service("service2")
-                .withInstance("instanceA")
-                .withInstance("instanceB")
-                .add()
-                .build();
-
-
-        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
-        when(healthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_DOWN);
-        when(healthInfoClientMock.getHealthInfoMap("http://service1instanceB/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-        when(healthInfoClientMock.getHealthInfoMap("http://service1instanceC/health")).thenReturn(HEALTH_CHECK_RESULT_DOWN);
-        when(healthInfoClientMock.getHealthInfoMap("http://service2instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_DOWN);
-        when(healthInfoClientMock.getHealthInfoMap("http://service2instanceB/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-
-        final HealthAggregatorProperties properties = createProperties("service1","service2");
-        Map<Status,Integer> thresholdsService1 = new HashMap<>();
-        thresholdsService1.put(new Status("WARNING"), 1);
-        thresholdsService1.put(Status.UP, 2);
-        final HashMap<Status,Integer> thresholdsService2 = new HashMap<>();
-        thresholdsService2.put(Status.OUT_OF_SERVICE, 1);
-        thresholdsService2.put(Status.UP, 2);
-        Map<String,Map<Status,Integer>> thresholdMaps = new HashMap<>();
-        thresholdMaps.put("service1", thresholdsService1);
-        thresholdMaps.put("service2", thresholdsService2);
-        properties.setThresholds(thresholdMaps);
-
-        final Health health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone",properties, discoveryClientMock, healthInfoClientMock, new OrderedHealthAggregator()).health();
-
-
-        assertThat(health, sameBeanAs(new Health.Builder().status(Status.OUT_OF_SERVICE)
-                .withDetail("SERVICE1", new Health.Builder().status("WARNING")
+        var expected = new Health.Builder().up()
+                .withDetail("service1", new Health.Builder().up()
                         .withDetail("instance-0", new Health.Builder().down()
-                                .withDetail("healthCheckUrl", "http://service1instanceA/health")
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceA:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
-                                .build()
-                        )
+                                .build())
                         .withDetail("instance-1", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service1instanceB/health")
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceB:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
-                                .build()
-                        )
+                                .build())
+                        .build())
+                .build();
+        assertThat(health.getStatus()).isEqualTo(Status.UP);
+        assertThat(health).isEqualTo(expected);
+    }
+
+
+    @Test
+    void overallStateIsDown_ifAllInstancesForAService_areDown() {
+
+        final ServiceInstance instance1A = instance("service1", "instanceA");
+        final ServiceInstance instance1B = instance("service1", "instanceB");
+        final ServiceInstance instance2A = instance("service2", "instanceA");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instance1A, instance1B, instance2A);
+
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1A))).thenReturn(HEALTH_CHECK_RESULT_DOWN);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1B))).thenReturn(HEALTH_CHECK_RESULT_DOWN);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance2A))).thenReturn(HEALTH_CHECK_RESULT_UP);
+
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone", createProperties("service1", "service2"),
+                discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
+
+        var expected = new Health.Builder().down()
+                .withDetail("service1", new Health.Builder().down()
+                        .withDetail("instance-0", new Health.Builder().down()
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceA:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
+                                .build())
+                        .withDetail("instance-1", new Health.Builder().down()
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceB:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
+                                .build())
+                        .build())
+                .withDetail("service2", new Health.Builder().up()
+                        .withDetail("instance-0", new Health.Builder().up()
+                                .withDetail("healthCheckUrl", URI.create("http://service2instanceA:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
+                                .build())
+                        .build())
+                .build();
+
+        assertThat(health.getStatus()).isEqualTo(Status.DOWN);
+        assertThat(health).isEqualTo(expected);
+    }
+
+
+    @Test
+    void servicesNotIn_neededServices_areNotDisplayed() {
+
+        final ServiceInstance instance1A = instance("service1", "instanceA");
+        final ServiceInstance instance2A = instance("service2", "instanceA");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instance1A, instance2A);
+
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1A))).thenReturn(HEALTH_CHECK_RESULT_UP);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance2A))).thenReturn(HEALTH_CHECK_RESULT_UP);
+
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone", createProperties("service2"),
+                discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
+
+        var expected = new Health.Builder().up()
+                .withDetail("service2", new Health.Builder().up()
+                        .withDetail("instance-0", new Health.Builder().up()
+                                .withDetail("healthCheckUrl", URI.create("http://service2instanceA:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
+                                .build())
+                        .build())
+                .build();
+
+        assertThat(health.getStatus()).isEqualTo(Status.UP);
+        assertThat(health).isEqualTo(expected);
+    }
+
+
+    @Test
+    void servicesWithCustomThresholds() {
+
+        final ServiceInstance instance1A = instance("service1", "instanceA");
+        final ServiceInstance instance1B = instance("service1", "instanceB");
+        final ServiceInstance instance1C = instance("service1", "instanceC");
+        final ServiceInstance instance2A = instance("service2", "instanceA");
+        final ServiceInstance instance2B = instance("service2", "instanceB");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instance1A, instance1B, instance1C, instance2A, instance2B);
+
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1A))).thenReturn(HEALTH_CHECK_RESULT_DOWN);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1B))).thenReturn(HEALTH_CHECK_RESULT_UP);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1C))).thenReturn(HEALTH_CHECK_RESULT_DOWN);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance2A))).thenReturn(HEALTH_CHECK_RESULT_DOWN);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance2B))).thenReturn(HEALTH_CHECK_RESULT_UP);
+
+        final HealthAggregatorProperties properties = createProperties("service1", "service2");
+
+        final Health health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone", properties,
+                        discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(),
+                        (service, status) -> service.getServiceName().equalsIgnoreCase("service1") ? WARNING : OUT_OF_SERVICE)
+                .health();
+
+        var expected = new Health.Builder().status(OUT_OF_SERVICE)
+                .withDetail("service1", new Health.Builder().status(WARNING)
+                        .withDetail("instance-0", new Health.Builder().down()
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceA:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
+                                .build())
+                        .withDetail("instance-1", new Health.Builder().up()
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceB:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
+                                .build())
                         .withDetail("instance-2", new Health.Builder().down()
-                                .withDetail("healthCheckUrl", "http://service1instanceC/health")
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceC:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
-                                .build()
-                        ).build()
-
-                )
-                .withDetail("SERVICE2", new Health.Builder().status(Status.OUT_OF_SERVICE)
+                                .build())
+                        .build())
+                .withDetail("service2", new Health.Builder().status(OUT_OF_SERVICE)
                         .withDetail("instance-0", new Health.Builder().down()
-                                .withDetail("healthCheckUrl", "http://service2instanceA/health")
+                                .withDetail("healthCheckUrl", URI.create("http://service2instanceA:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
-                                .build()
-                        )
+                                .build())
                         .withDetail("instance-1", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service2instanceB/health")
+                                .withDetail("healthCheckUrl", URI.create("http://service2instanceB:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
-                                .build()
-                        ).build()
+                                .build())
+                        .build())
+                .build();
 
-                ).build()));
+        assertThat(health.getStatus()).isEqualTo(Status.OUT_OF_SERVICE);
+        assertThat(health).isEqualTo(expected);
     }
 
 
     @Test
-    public void twoServiceInstancesInSeparateZone_configuredToFetchBoth() {
+    void serviceWithCustomThreshold_noAvailableInstance() {
 
-        final DiscoveryClient discoveryClientMock = new DiscoveryClientMockBuilder()
-                .service("service1")
-                .withInstance("instanceA")
-                .inZone("zoneA")
-                .withInstance("instanceB")
-                .inZone("zoneB")
-                .add()
+        final DiscoveryClient discoveryClientMock = discoveryClientWith();
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        final HealthAggregatorProperties properties = createProperties("service1");
+
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("defaultZone", properties,
+                discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(), (service, status) -> Status.UP).health();
+
+        var expected = new Health.Builder().up()
+                .withDetail("service1", new Health.Builder().up()
+                        .withDetail("error", "There is no available instance of service service1 in the service registry!")
+                        .build())
                 .build();
 
+        assertThat(health.getStatus()).isEqualTo(Status.UP);
+        assertThat(health).isEqualTo(expected);
+    }
 
-        final HealthInfoClient mhealthInfoClientMock = mock(HealthInfoClient.class);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceB/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
+
+    @Test
+    void twoServiceInstancesInSeparateZone_configuredToFetchBoth() {
+
+        final ServiceInstance instance = instance("service1", "instanceA", "zoneA");
+        final ServiceInstance instance1 = instance("service1", "instanceB", "zoneB");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instance, instance1);
+
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance))).thenReturn(HEALTH_CHECK_RESULT_UP);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instance1))).thenReturn(HEALTH_CHECK_RESULT_UP);
 
         final HealthAggregatorProperties healthAggregatorProperties = new HealthAggregatorProperties() {
             @Override
@@ -308,87 +319,106 @@ public class ServiceHealthAggregationConfigurationTest {
                 return false;
             }
         };
-        healthAggregatorProperties.setNeededServices(Arrays.asList("service1"));
-        final HealthAggregatorProperties properties = healthAggregatorProperties;
-        final Health health = new ServiceHealthAggregationConfiguration().aggregatedServices("zoneA", properties, discoveryClientMock, mhealthInfoClientMock, new OrderedHealthAggregator()).health();
+        healthAggregatorProperties.setNeededServices(createServices("service1"));
 
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("zoneA", healthAggregatorProperties,
+                discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
 
-        assertThat(health, sameBeanAs(new Health.Builder().up()
-                .withDetail("SERVICE1", new Health.Builder().up()
+        var expected = new Health.Builder().up()
+                .withDetail("service1", new Health.Builder().up()
                         .withDetail("instance-0", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service1instanceA/health")
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceA:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
                                 .build())
                         .withDetail("instance-1", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service1instanceB/health")
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceB:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
-                                .build()).build())
-                .build()
-        ));
+                                .build())
+                        .build())
+                .build();
+
+        assertThat(health.getStatus()).isEqualTo(Status.UP);
+        assertThat(health).isEqualTo(expected);
     }
 
 
     @Test
-    public void twoServiceInstancesInSeparateZone_onlyOwnZoneIsChecked() {
+    void twoInstance_oneUp_oneDown_resultsInWarning() {
 
-        final DiscoveryClient discoveryClientMock = new DiscoveryClientMockBuilder()
-                .service("service1")
-                .withInstance("instanceA")
-                .inZone("zoneA")
-                .withInstance("instanceB")
-                .inZone("zoneB")
-                .add()
-                .build();
+        final ServiceInstance instanceA = instance("service1", "instanceA");
+        final ServiceInstance instanceB = instance("service1", "instanceB");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instanceA, instanceB);
 
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instanceA))).thenReturn(HEALTH_CHECK_RESULT_DOWN);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instanceB))).thenReturn(HEALTH_CHECK_RESULT_UP);
 
-        final HealthInfoClient mhealthInfoClientMock = mock(HealthInfoClient.class);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceA/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
-        when(mhealthInfoClientMock.getHealthInfoMap("http://service1instanceB/health")).thenReturn(HEALTH_CHECK_RESULT_UP);
+        final HealthAggregatorProperties healthAggregatorProperties = new HealthAggregatorProperties() {
+            @Override
+            public boolean isIgnoreOtherRegistryZones() {
+                return false;
+            }
+        };
+        healthAggregatorProperties.setNeededServices(createServices("service1"));
+        healthAggregatorProperties.setNeededServices(Map.of("service1", 2));
 
-        final Health health = new ServiceHealthAggregationConfiguration().aggregatedServices("zoneA", createProperties("service1"), discoveryClientMock, mhealthInfoClientMock, new OrderedHealthAggregator()).health();
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("zoneA", healthAggregatorProperties,
+                discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
 
-
-        assertThat(health, sameBeanAs(new Health.Builder().up()
-                .withDetail("SERVICE1", new Health.Builder().up()
-                        .withDetail("instance-0", new Health.Builder().up()
-                                .withDetail("healthCheckUrl", "http://service1instanceA/health")
+        var expected = new Health.Builder().status(WARNING)
+                .withDetail("service1", new Health.Builder().status(WARNING)
+                        .withDetail("instance-0", new Health.Builder().down()
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceA:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_DOWN)
+                                .build())
+                        .withDetail("instance-1", new Health.Builder().up()
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceB:8081/actuator/health"))
                                 .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
                                 .build())
                         .build())
-                .build()
-        ));
+                .build();
+
+        assertThat(health.getStatus()).isEqualTo(WARNING);
+        assertThat(health).isEqualTo(expected);
     }
 
 
+    @Test
+    void twoServiceInstancesInSeparateZone_onlyOwnZoneIsChecked() {
+
+        final ServiceInstance instanceA = instance("service1", "instanceA", "zoneA");
+        final ServiceInstance instanceB = instance("service1", "instanceB", "zoneB");
+        final DiscoveryClient discoveryClientMock = discoveryClientWith(instanceA, instanceB);
+
+        final HealthInfoClient healthInfoClientMock = mock(HealthInfoClient.class);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instanceA))).thenReturn(HEALTH_CHECK_RESULT_UP);
+        when(healthInfoClientMock.getHealthInfoMap(eq(instanceB))).thenReturn(HEALTH_CHECK_RESULT_UP);
+
+        var health = new ServiceHealthAggregationConfiguration().aggregatedServices("zoneA", createProperties("service1"),
+                discoveryClientMock, healthInfoClientMock, DefaultApplicationStatusHealthAggregator.create(), new DefaultServiceStatusAggregator()).health();
+
+        var expected = new Health.Builder().up()
+                .withDetail("service1", new Health.Builder().up()
+                        .withDetail("instance-0", new Health.Builder().up()
+                                .withDetail("healthCheckUrl", URI.create("http://service1instanceA:8081/actuator/health"))
+                                .withDetail("instanceHealth", HEALTH_CHECK_RESULT_UP)
+                                .build())
+                        .build())
+                .build();
+
+        assertThat(health.getStatus()).isEqualTo(UP);
+        assertThat(health).isEqualTo(expected);
+    }
 
 
     private HealthAggregatorProperties createProperties(String... services) {
         final HealthAggregatorProperties healthAggregatorProperties = new HealthAggregatorProperties();
-        healthAggregatorProperties.setNeededServices(Arrays.asList(services));
+        healthAggregatorProperties.setNeededServices(createServices(services));
         return healthAggregatorProperties;
     }
 
-
-
-
-    private Matcher<Health> statusIs(Status status) {
-        return new TypeSafeMatcher<Health>() {
-
-            @Override
-            public void describeTo(Description description) {
-                description.appendText("Expected status to be up");
-            }
-
-            @Override
-            protected boolean matchesSafely(Health item) {
-                return item.getStatus().equals(status);
-            }
-
-        };
-
-
-
+    private Map<String,Integer> createServices(String... serviceNames) {
+        return Stream.of(serviceNames).collect(Collectors.toMap(Function.identity(), s -> 1));
     }
-
 
 }

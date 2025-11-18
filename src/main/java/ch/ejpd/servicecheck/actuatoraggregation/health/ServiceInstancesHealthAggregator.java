@@ -1,22 +1,28 @@
 package ch.ejpd.servicecheck.actuatoraggregation.health;
 
-import ch.ejpd.servicecheck.actuatoraggregation.configuration.InstancesThreshold;
-import org.springframework.boot.actuate.health.AbstractHealthAggregator;
+import org.springframework.boot.actuate.health.SimpleStatusAggregator;
 import org.springframework.boot.actuate.health.Status;
 
-import java.util.List;
+import java.util.Set;
 
-public class ServiceInstancesHealthAggregator extends AbstractHealthAggregator {
+public class ServiceInstancesHealthAggregator extends SimpleStatusAggregator {
 
-    private InstancesThreshold instancesThreshold;
+    private NeededService neededService;
+    private ServiceStatusAggregator serviceStatusAggregator;
 
-    ServiceInstancesHealthAggregator(InstancesThreshold instancesThreshold) {
-        this.instancesThreshold = instancesThreshold;
+    ServiceInstancesHealthAggregator(NeededService neededService, ServiceStatusAggregator serviceStatusAggregator) {
+        this.neededService = neededService;
+        this.serviceStatusAggregator = serviceStatusAggregator;
     }
+
+    //    @Override
+    //    protected Status aggregateStatus(List<Status> candidates) {
+    //        return serviceStatusAggregator.aggregateServiceStatus(neededService, candidates);
+    //    }
 
     @Override
-    protected Status aggregateStatus(List<Status> candidates) {
-        final long count = candidates.stream().filter(status -> status.equals(Status.UP)).count();
-        return instancesThreshold.evaluateForUpInstances((int) count);
+    public Status getAggregateStatus(Set<Status> statuses) {
+        return serviceStatusAggregator.aggregateServiceStatus(neededService, statuses);
     }
 }
+
