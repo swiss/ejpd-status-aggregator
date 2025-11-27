@@ -12,8 +12,8 @@ usedBy:
 developmentStatus: stable
 softwareType: library
 organisation:
-  uri: https://ld.admin.ch/office/III.1.1
-  name: Generalsekretariat
+  uri: https://ld.admin.ch/ou/10009470
+  name: Informatik Service Center ISC-EJPD
 description:
   en:
     localisedName: Health Status Aggregator
