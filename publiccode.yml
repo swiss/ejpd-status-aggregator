@@ -1,4 +1,4 @@
-publiccodeYmlVersion: 0.4.0
+publiccodeYmlVersion: 0.5.0
 name: ejpd-status-aggregator
 url: https://github.com/swiss/ejpd-status-aggregator
 softwareVersion: 3.5.001
@@ -12,7 +12,8 @@ usedBy:
 developmentStatus: stable
 softwareType: library
 organisation:
-  uri: https://ld.admin.ch/department/III
+  uri: https://ld.admin.ch/office/III.1.1
+  name: Generalsekretariat
 description:
   en:
     localisedName: Health Status Aggregator
@@ -29,6 +30,8 @@ legal:
   license: MIT
 maintenance:
   type: internal
+  contacts:
+    - name: ISC-EJPD
 localisation:
   localisationReady: false
   availableLanguages:
